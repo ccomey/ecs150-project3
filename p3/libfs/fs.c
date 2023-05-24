@@ -7,11 +7,69 @@
 #include "disk.h"
 #include "fs.h"
 
+struct SuperBlock{
+	int8_t signature[8];
+	uint16_t num_blocks;
+	int16_t root_index;
+	uint16_t data_start_index;
+	uint16_t num_data_blocks;
+	uint8_t num_fat_blocks;
+	uint8_t padding[4079];
+};
+
+struct Root{
+	int8_t filename[16];
+	uint32_t file_size;
+	uint16_t first_index;
+	int8_t padding[10];
+};
+
+struct FATBlock{
+	int16_t files[2048];
+};
+
 /* TODO: Phase 1 */
 
 int fs_mount(const char *diskname)
 {
 	/* TODO: Phase 1 */
+
+	// open the disk
+	block_disk_open(diskname);
+
+	// load the buffer containing the superblock data
+	void* superblock_buffer;
+	block_read(0, superblock_buffer);
+	int8_t* superblock_ptr = (int8_t*)superblock_buffer;
+
+	// load each byte of the signature in one at a time
+	struct SuperBlock sb;
+	for (unsigned i = 0; i < 8; i++){
+		sb.signature[i] = *(superblock_ptr++);
+	}
+
+	// this should concatenate the next two bytes of the buffer
+	sb.num_blocks = *superblock_ptr << 8 | *(++superblock_ptr);
+	superblock_ptr++;
+
+	sb.root_index = *superblock_ptr << 8 | *(++superblock_ptr);
+	superblock_ptr++;
+
+	sb.data_start_index = *superblock_ptr << 8 | *(++superblock_ptr);
+	superblock_ptr++;
+
+	sb.num_data_blocks = *superblock_ptr << 8 | *(++superblock_ptr);
+
+	sb.num_fat_blocks = *(++superblock_ptr);
+
+	// this should be all of the padding
+	for (unsigned i = 17; i < 4079; i++){
+		sb.signature[i] = *(superblock_ptr++);
+	}
+
+
+	// this should be moved to fs_unmount once this function is finished
+	block_disk_close();
 }
 
 int fs_umount(void)
