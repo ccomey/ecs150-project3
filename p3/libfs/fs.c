@@ -238,8 +238,29 @@ int fs_info(void)
 int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
+<<<<<<< HEAD
 	printf("%s\n", filename);
 	return 0;
+=======
+	int MAX_ENTRIES[] = 128;
+	struct Root root_dir;
+
+	// When directory is empty
+	root_dir.file_size = 0;
+	root_dir.first_index = "FAT_EOC";
+
+	// Find free entry in the directory
+	for (unsigned i = 0; i < MAX_ENTRIES; i++){
+		if (root_dir.first_index == "FAT_EOC"){
+			root_dir.filename[16] = filename;
+			//SET FILE SIZE
+		}
+		else if (root_dir.first_index < MAX_ENTRIES){
+			//find empty entry to add file
+		}
+		
+	}
+>>>>>>> refs/remotes/origin/main
 }
 
 int fs_delete(const char *filename)
