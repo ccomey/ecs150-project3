@@ -14,10 +14,10 @@ endif
 all: $(lib)
 
 # Dep Tracking
-deps := $(patsubst %.o,$(objs))
+deps := $(patsubst %.o,%.d,$(objs))
 -include $(deps)
 
-libfs.a: $(obj)
+libfs.a: $(objs)
 	@echo "CC $@"
 	$(Q)ar rcs -o $@ $^
 
