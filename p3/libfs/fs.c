@@ -13,6 +13,7 @@
 #define SUPERBLOCK_PAD_LEN BLOCK_SIZE-SUPERBLOCK_PREPAD_LEN
 
 #define FATBLOCK_FILENO 2048
+#define FAT_EOC 0xFFFF
 
 struct SuperBlock{
 	uint8_t signature[8];
@@ -78,15 +79,6 @@ int load_superblock(uint8_t* superblock_ptr){
 		fprintf(stderr, "Error in fs_mount(): pointer to superblock is null\n");
 		return -1;
 	}
-
-	// for (unsigned i = 0; i < 20; i++){
-	// 	// if (i <= SUPERBLOCK_SIG_LEN){
-	// 	// 	printf("%c", *(superblock_ptr+i));
-	// 	// } else 
-	// 	// 	printf("%d", *(superblock_ptr+i));
-	// 	printf("%d ", *(superblock_ptr+i));
-	// }
-	// printf("\n");
 
 	// load each byte of the signature in one at a time
 	for (unsigned i = 0; i < SUPERBLOCK_SIG_LEN; i++){
@@ -163,7 +155,7 @@ int load_fat_blocks(uint8_t* fat_block_ptr){
 	}
 
 	for (unsigned i = 0; i < sb->num_fat_blocks; i++){
-		printf("allocating fat block #%d\n", i);
+		// printf("allocating fat block #%d\n", i);
 		struct FATBlock* fat_block = malloc(sizeof(struct FATBlock));
 		if (fat_block == NULL){
 			return -1;
@@ -180,6 +172,12 @@ int load_fat_blocks(uint8_t* fat_block_ptr){
 }
 
 int load_root_directory(uint8_t* root_ptr){
+	// printf("root dir\n");
+	// for (unsigned i = 0; i < BLOCK_SIZE; i++){
+	// 	printf("%d ", *(root_ptr+i));
+	// }
+	// printf("\n");
+
 	root = malloc(sizeof(struct Root));
 	for (unsigned f = 0; f < FS_FILE_MAX_COUNT; f++){
 		struct File* file = malloc(sizeof(struct File));
@@ -201,6 +199,31 @@ int load_root_directory(uint8_t* root_ptr){
 	}
 
 	return 0;
+}
+
+// finds the first empty entry in the root directory and returns its index
+// returns -1 if unable to find empty entry
+int find_empty_root_entry(){
+	for (unsigned i = 0; i < FS_FILENAME_LEN; i++){
+		if (root->files[i]->filename[0] == 0){
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+// returns -1 if there is no matching filename in the root directory
+// returns the file index if there is a matching filename
+// no error checking here because that is done before it is called
+int find_matching_filename(const char* filename){
+	for (unsigned i = 0; i < FS_FILE_MAX_COUNT; i++){
+		if (strcmp(filename, (char*)(root->files[i]->filename)) == 0){
+			return i;
+		}
+	}
+
+	return -1;
 }
 
 int fs_mount(const char *diskname)
@@ -247,7 +270,7 @@ int fs_umount(void)
 	for (unsigned i = 0; i < FS_FILE_MAX_COUNT; i++){
 		free(root->files[i]);
 	}
-	
+
 	free(root);
 
 	for (unsigned i = 0; i < sb->num_fat_blocks; i++){
@@ -320,39 +343,76 @@ int fs_info(void)
 int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
-	// int MAX_ENTRIES[] = 128;
-	// struct Root root_dir;
 
-	// // When directory is empty
-	// root_dir.file_size = 0;
-	// root_dir.first_index = "FAT_EOC";
+	if (filename == NULL || *filename == 0 || strlen(filename)+1 > FS_FILENAME_LEN){
+		fprintf(stderr, "Error in fs_create(): invalid file name\n");
+		return -1;
+	}
 
-	// // Find free entry in the directory
-	// for (unsigned i = 0; i < MAX_ENTRIES; i++){
-	// 	if (root_dir.first_index == "FAT_EOC"){
-	// 		root_dir.filename[16] = filename;
-	// 		//SET FILE SIZE
-	// 	}
-	// 	else if (root_dir.first_index < MAX_ENTRIES){
-	// 		//find empty entry to add file
-	// 	}
-		
-	// }
+	if (find_matching_filename(filename) != -1){
+		fprintf(stderr, "Error in fs_create(): file named %s already exists\n", filename);
+		return -1;
+	}
 
-	printf("%s\n", filename);
+	// find new entry
+	int empty_index = find_empty_root_entry();
+	if (empty_index == -1){
+		fprintf(stderr, "Error in fs_create(): unable to find empty index\n");
+		return -1;
+	}
+	struct File* new_file = root->files[empty_index];
+
+	// since new_file->filename is an array of uint8_t,
+	// and filename is a char*,
+	// we must fill up the array byte-by-byte instead of all at once
+	for (unsigned i = 0; i < strlen(filename); i++){
+		new_file->filename[i] = filename[i];
+	}
+
+	new_file->filename[strlen(filename)] = '\0';
+
+	// reset the other members of the struct
+	new_file->file_size = 0;
+	new_file->first_index = FAT_EOC;
+
+	// printf("%s\n", filename);
 	return 0;
 }
 
 int fs_delete(const char *filename)
 {
 	/* TODO: Phase 2 */
-	printf("%s\n", filename);
+	if (filename == NULL || *filename == 0 || strlen(filename)+1 > FS_FILENAME_LEN){
+		fprintf(stderr, "Error in fs_delete(): invalid file name\n");
+		return -1;
+	}
+
+	int matching_file_index = find_matching_filename(filename);
+	if (matching_file_index == -1){
+		fprintf(stderr, "Error in fs_create(): file named %s does not exist\n", filename);
+		return -1;
+	}
+
+	struct File* old_file = root->files[matching_file_index];
+	// TODO: remove from FAT
+	old_file->filename[0] = '\0';
+	old_file->file_size = 0;
+	old_file->first_index = FAT_EOC;
+
 	return 0;
 }
 
 int fs_ls(void)
 {
 	/* TODO: Phase 2 */
+	for (unsigned i = 0; i < FS_FILE_MAX_COUNT; i++){
+		if (root->files[i]->filename[0] != 0){
+			printf("File #%d\n", i);
+			printf("Name: %s\n", root->files[i]->filename);
+			printf("Size: %d\n", root->files[i]->file_size);
+			printf("First index: %d\n", root->files[i]->first_index);
+		}
+	}
 	return 0;
 }
 
