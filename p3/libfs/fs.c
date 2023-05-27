@@ -15,6 +15,8 @@
 #define FATBLOCK_FILENO 2048
 #define FAT_EOC 0xFFFF
 
+#define DEBUG_MODE 1
+
 struct SuperBlock{
 	uint8_t signature[8];
 	uint16_t num_blocks;
@@ -45,6 +47,11 @@ struct FATBlock{
 struct SuperBlock* sb;
 struct FATBlock** fat_blocks;
 struct Root* root;
+
+void debug(const char* s){
+	if (DEBUG_MODE)
+		printf("%s\n", s);
+}
 
 uint16_t concatenate_two_bytes(uint8_t byte1, uint8_t byte2){
 	uint16_t result = 0;
@@ -148,24 +155,41 @@ int load_superblock(uint8_t* superblock_ptr){
 	return 0;
 }
 
-int load_fat_blocks(uint8_t* fat_block_ptr){
+int load_fat_blocks(){
 	fat_blocks = malloc(sizeof(fat_blocks));
 	if (fat_blocks == NULL){
 		return -1;
 	}
 
+	uint16_t* buffer[BLOCK_SIZE/2];
+	void* buf_ptr = &buffer;
+
+	int read_success;
 	for (unsigned i = 0; i < sb->num_fat_blocks; i++){
 		// printf("allocating fat block #%d\n", i);
-		struct FATBlock* fat_block = malloc(sizeof(struct FATBlock));
+		read_success = block_read(i+1, buf_ptr);
+
+		if (read_success == -1){
+			fprintf(stderr, "Error in load_fat_blocks: failed read\n");
+			return -1;
+		}
+
+		uint16_t* fat_block_ptr = (uint16_t*)buf_ptr;
+		fat_blocks[i] = malloc(sizeof(struct FATBlock));
+		struct FATBlock* fat_block = fat_blocks[i];
 		if (fat_block == NULL){
+			fprintf(stderr, "Error in load_fat_blocks: failed malloc\n");
 			return -1;
 		}
 		for (unsigned j = 0; j < FATBLOCK_FILENO; j++){
-			fat_block->files[j] = concatenate_two_bytes(*fat_block_ptr, *(fat_block_ptr+1));
-			fat_block_ptr += 2;
+			fat_block->files[j] = *fat_block_ptr;
+			// printf("%d new element = %d\n", j, *fat_block_ptr);
+
+			if (j < FATBLOCK_FILENO-1)
+				fat_block_ptr++;
 		}
 
-		fat_blocks[i] = fat_block;
+		// printf("finished loading\n");
 	}
 
 	return 0;
@@ -226,6 +250,10 @@ int find_matching_filename(const char* filename){
 	return -1;
 }
 
+int load_files(){
+	return 0;
+}
+
 int fs_mount(const char *diskname)
 {
 	/* TODO: Phase 1 */
@@ -238,8 +266,8 @@ int fs_mount(const char *diskname)
 	}
 
 	// load the buffer containing the superblock data
-	uint8_t superblock_buffer[BLOCK_SIZE];
-	void* buf_ptr = &superblock_buffer;
+	uint8_t buffer[BLOCK_SIZE];
+	void* buf_ptr = &buffer;
 
 	int read_success = block_read(0, buf_ptr);
 	// printf("read superblock %d\n", read_success);
@@ -247,17 +275,20 @@ int fs_mount(const char *diskname)
 		return -1;
 	}
 
+
 	uint8_t* superblock_ptr = (uint8_t*)buf_ptr;
 
 	if (load_superblock(superblock_ptr) != 0){
 		return -1;
 	}
 	
-	if (load_fat_blocks(superblock_ptr) != 0){
+	if (load_fat_blocks() != 0){
 		return -1;
 	}
 
-	if (load_root_directory(superblock_ptr) != 0){
+	read_success = block_read(sb->num_fat_blocks+1, buf_ptr);
+	uint8_t* root_ptr = (uint8_t*)buf_ptr;
+;	if (load_root_directory(root_ptr) != 0){
 		return -1;
 	}
 
