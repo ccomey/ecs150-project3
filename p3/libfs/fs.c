@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 #include <math.h>
 
 #include "disk.h"
@@ -42,15 +43,36 @@ struct FATBlock{
 	uint16_t files[FATBLOCK_FILENO];
 };
 
+struct FileDescriptor{
+	struct File* file;
+	uint16_t offset;
+	bool is_open;
+};
+
 /* TODO: Phase 1 */
 
 struct SuperBlock* sb;
 struct FATBlock** fat_blocks;
 struct Root* root;
+struct FileDescriptor* open_files[FS_OPEN_MAX_COUNT];
+uint8_t num_open_files = 0;
+bool is_disk_mounted = false;
 
 void debug(const char* s){
 	if (DEBUG_MODE)
 		printf("%s\n", s);
+}
+
+int streq(const uint8_t* str1, const uint8_t* str2){
+	for (unsigned i = 0; i < FS_FILENAME_LEN; i++){
+		if (str1[i] == '\0' && str2[i] == '\0'){
+			return 0;
+		} else if (str1[i] != str2[i]){
+			return -1;
+		}
+	}
+
+	return -1;
 }
 
 uint16_t concatenate_two_bytes(uint8_t byte1, uint8_t byte2){
@@ -69,7 +91,15 @@ uint32_t concatenate_four_bytes(uint8_t byte1, uint8_t byte2, uint8_t byte3, uin
 	return result;
 }
 
+bool is_filename_invalid(const char* filename){
+	return filename == NULL || *filename == '\0' || strlen(filename)+1 > FS_FILENAME_LEN;
+}
+
 int load_disk(const char* diskname){
+	if (is_disk_mounted){
+		fprintf(stderr, "Error in fs_mount(): disk already mounted\n");
+		return -1;
+	}
 	int open_disk_success = block_disk_open(diskname);
 	// printf("disk success = %d\n", open_disk_success);
 	if (open_disk_success != 0){
@@ -77,6 +107,7 @@ int load_disk(const char* diskname){
 		return -1;
 	}
 
+	is_disk_mounted = true;
 	return 0;
 }
 
@@ -250,8 +281,27 @@ int find_matching_filename(const char* filename){
 	return -1;
 }
 
-int load_files(){
-	return 0;
+int add_file_to_fd_array(struct File* file){
+	if (num_open_files > FS_OPEN_MAX_COUNT){
+		return -1;
+	}
+	
+	struct FileDescriptor* fd = malloc(sizeof(struct FileDescriptor));
+	fd->file = file;
+	fd->is_open = true;
+	fd->offset = 0;
+	
+	int fd_index = -1;
+	for (unsigned i = 0; i < FS_OPEN_MAX_COUNT; i++){
+		if (open_files[i] == NULL){
+			open_files[i] = fd;
+			fd_index = i;
+			num_open_files++;
+			break;
+		}
+	}
+
+	return fd_index;
 }
 
 int fs_mount(const char *diskname)
@@ -313,6 +363,8 @@ int fs_umount(void)
 	free(sb);
 
 	block_disk_close();
+
+	is_disk_mounted = false;
 	return 0;
 }
 
@@ -375,7 +427,7 @@ int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
 
-	if (filename == NULL || *filename == 0 || strlen(filename)+1 > FS_FILENAME_LEN){
+	if (is_filename_invalid(filename)){
 		fprintf(stderr, "Error in fs_create(): invalid file name\n");
 		return -1;
 	}
@@ -405,6 +457,10 @@ int fs_create(const char *filename)
 	// reset the other members of the struct
 	new_file->file_size = 0;
 	new_file->first_index = FAT_EOC;
+
+	for (unsigned i = 0; i < FS_OPEN_MAX_COUNT; i++){
+		open_files[i] = NULL;
+	}
 
 	// printf("%s\n", filename);
 	return 0;
@@ -450,14 +506,51 @@ int fs_ls(void)
 int fs_open(const char *filename)
 {
 	/* TODO: Phase 3 */
-	printf("%s\n", filename);
-	return 0;
+	if (!is_disk_mounted){
+		fprintf(stderr, "Error in fs_open(): no disk is mounted\n");
+		return -1;
+	}
+
+	if (is_filename_invalid(filename)){
+		fprintf(stderr, "Error in fs_create(): invalid file name\n");
+		return -1;
+	}
+
+	int file_index = find_matching_filename(filename);
+	if (file_index == -1){
+		fprintf(stderr, "Error in fs_open(): file %s not found\n", filename);
+		return -1;
+	}
+
+	int fd = add_file_to_fd_array(root->files[file_index]);
+	if (fd == -1){
+		fprintf(stderr, "Error in fs_open(): max number of files already open\n");
+		return -1;
+	}
+
+	return fd;
 }
 
 int fs_close(int fd)
 {
 	/* TODO: Phase 3 */
-	printf("%d\n", fd);
+	if (!is_disk_mounted){
+		fprintf(stderr, "Error in fs_close(): no disk is mounted\n");
+		return -1;
+	}
+
+	if (fd < 0 || fd >= FS_FILE_MAX_COUNT){
+		fprintf(stderr, "Error in fs_close(): file descriptor %d out of bounds\n", fd);
+		return -1;
+	}
+
+	if (open_files[fd] == NULL){
+		fprintf(stderr, "Error in fs_close(): file with descriptor %d not open\n", fd);
+		return -1;
+	}
+
+	open_files[fd] = NULL;
+	num_open_files--;
 	return 0;
 }
 
