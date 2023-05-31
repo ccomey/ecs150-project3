@@ -46,7 +46,6 @@ struct FATBlock{
 struct FileDescriptor{
 	struct File* file;
 	uint16_t offset;
-	bool is_open;
 };
 
 /* TODO: Phase 1 */
@@ -288,7 +287,6 @@ int add_file_to_fd_array(struct File* file){
 	
 	struct FileDescriptor* fd = malloc(sizeof(struct FileDescriptor));
 	fd->file = file;
-	fd->is_open = true;
 	fd->offset = 0;
 	
 	int fd_index = -1;
@@ -302,6 +300,22 @@ int add_file_to_fd_array(struct File* file){
 	}
 
 	return fd_index;
+}
+
+int find_num_target_blocks(uint16_t offset, size_t count){
+	int num_target_blocks = 0;
+	if (offset+count > BLOCK_SIZE){
+		num_target_blocks++;
+		count -= offset;
+		num_target_blocks += count / BLOCK_SIZE;
+		if (count % BLOCK_SIZE > 0){
+			num_target_blocks++;
+		}
+	} else {
+		num_target_blocks = 1;
+	}
+
+	return num_target_blocks;
 }
 
 int fs_mount(const char *diskname)
@@ -557,22 +571,140 @@ int fs_close(int fd)
 int fs_stat(int fd)
 {
 	/* TODO: Phase 3 */
-	printf("%d\n", fd);
-	return 0;
+	if (!is_disk_mounted){
+		fprintf(stderr, "Error in fs_stat(): no disk is mounted\n");
+		return -1;
+	}
+
+	if (fd < 0 || fd >= FS_FILE_MAX_COUNT){
+		fprintf(stderr, "Error in fs_stat(): file descriptor %d out of bounds\n", fd);
+		return -1;
+	}
+
+	if (open_files[fd] == NULL){
+		fprintf(stderr, "Error in fs_stat(): file with descriptor %d not open\n", fd);
+		return -1;
+	}
+
+	return open_files[fd]->file->file_size;
 }
 
 int fs_lseek(int fd, size_t offset)
 {
 	/* TODO: Phase 3 */
-	printf("%d %ld\n", fd, offset);
+	if (!is_disk_mounted){
+		fprintf(stderr, "Error in fs_lseek(): no disk is mounted\n");
+		return -1;
+	}
+
+	if (fd < 0 || fd >= FS_FILE_MAX_COUNT){
+		fprintf(stderr, "Error in fs_lseek(): file descriptor %d out of bounds\n", fd);
+		return -1;
+	}
+
+	if (open_files[fd] == NULL){
+		fprintf(stderr, "Error in fs_lseek(): file with descriptor %d not open\n", fd);
+		return -1;
+	}
+
+	if (offset > open_files[fd]->file->file_size){
+		fprintf(stderr, "Error in fs_lseek(): specified offset too large\n");
+		return -1;
+	}
+
+	open_files[fd]->offset = offset;
 	return 0;
 }
 
 int fs_write(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
-	printf("%d %p %ld\n", fd, buf, count);
-	return 0;
+	/**
+	 * fs_write - Write to a file
+	 * @fd: File descriptor
+	 * @buf: Data buffer to write in the file
+	 * @count: Number of bytes of data to be written
+	 *
+	 * Attempt to write @count bytes of data from buffer pointer by @buf into the
+	 * file referenced by file descriptor @fd. It is assumed that @buf holds at
+	 * least @count bytes.
+	 *
+	 * When the function attempts to write past the end of the file, the file is
+	 * automatically extended to hold the additional bytes. If the underlying disk
+	 * runs out of space while performing a write operation, fs_write() should write
+	 * as many bytes as possible. The number of written bytes can therefore be
+	 * smaller than @count (it can even be 0 if there is no more space on disk).
+	 * 
+	 * Return: -1 if no FS is currently mounted, or if file descriptor @fd is
+	 * invalid (out of bounds or not currently open), or if @buf is NULL. Otherwise
+	 * return the number of bytes actually written.
+	*/
+
+	if (!is_disk_mounted){
+		fprintf(stderr, "Error in fs_write(): no disk is mounted\n");
+		return -1;
+	}
+
+	if (fd < 0 || fd >= FS_FILE_MAX_COUNT){
+		fprintf(stderr, "Error in fs_write(): file descriptor %d out of bounds\n", fd);
+		return -1;
+	}
+
+	if (open_files[fd] == NULL){
+		fprintf(stderr, "Error in fs_write(): file with descriptor %d not open\n", fd);
+		return -1;
+	}
+
+	if (buf == NULL){
+		fprintf(stderr, "Error in fs_write(): buf is null\n");
+		return -1;
+	}
+
+
+	uint16_t offset = open_files[fd]->offset;
+	uint8_t block0[BLOCK_SIZE];
+	int num_target_blocks = find_num_target_blocks(offset, count);
+
+	uint8_t bounce_buffer[BLOCK_SIZE];
+
+	if (block_read(open_files[fd]->file->first_index, block0) < 0){
+		fprintf(stderr, "Error in fs_write(): could not read first data block\n");
+		return -1;
+	}
+	// memcpy: destination pointer, source pointer, num_bytes
+
+	// copy info into first block
+	memcpy(bounce_buffer, block0, offset);
+	memcpy(&bounce_buffer[offset+1], buf, count);
+	memcpy(&bounce_buffer[offset+count+1], &block0[offset+count+1], BLOCK_SIZE-count-offset);
+	if (block_write(open_files[fd]->file->first_index, bounce_buffer) < 0){
+		fprintf(stderr, "Error in fs_write(): could not write first data block\n");
+		return -1;
+	}
+
+	for (int i = 1; i < num_target_blocks-1; i++){
+		int block_index = i; // TODO: find next index
+		if (block_write(block_index, buf+(BLOCK_SIZE*i)) < 0){
+			fprintf(stderr, "Error in fs_write(): could not write data block %d, located at index %d\n", i, block_index);
+			return -1;
+		}
+	}
+
+	if (num_target_blocks > 1){
+		int final_block_index = 0; // TODO: find last index
+		uint8_t final_block[BLOCK_SIZE];
+		if (block_read(final_block_index, final_block) < 0){
+			fprintf(stderr, "Error in fs_write(): could not read final data block, located at index %d\n", final_block_index);
+			return -1;
+		}
+
+		uint16_t final_len = (count-offset) % BLOCK_SIZE;
+		memcpy(bounce_buffer, buf+(BLOCK_SIZE*(num_target_blocks-2)+offset), final_len);
+		memcpy(&bounce_buffer[final_len+1], &final_block[final_len+1], BLOCK_SIZE-final_len);
+	}
+
+	// TODO: keep track of how many bytes were written
+	return count;
 }
 
 int fs_read(int fd, void *buf, size_t count)
