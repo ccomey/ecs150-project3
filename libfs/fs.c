@@ -391,19 +391,16 @@ int fs_mount(const char *diskname)
 	if (load_superblock(superblock_ptr) != 0){
 		return -1;
 	}
-	printf("finished superblock\n");
 	
 	if (load_fat() != 0){
 		return -1;
 	}
-	printf("finished fat\n");
 
 	read_success = block_read(sb->num_fat_blocks+1, buf_ptr);
 	uint8_t* root_ptr = (uint8_t*)buf_ptr;
 ;	if (load_root_directory(root_ptr) != 0){
 		return -1;
 	}
-	printf("finished root\n");
 
 	return 0;
 }
@@ -436,7 +433,6 @@ int fs_umount(void)
 int fs_info(void)
 {
 	/* TODO: Phase 1 */
-	printf("running fs info\n");
 	if (!is_disk_mounted){
 		fprintf(stderr, "Error in fs_info(): no disk is mounted\n");
 		return -1;
