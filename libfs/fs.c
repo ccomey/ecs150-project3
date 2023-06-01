@@ -198,7 +198,7 @@ int load_fat(){
 		}
 	}
 
-	for (uint16_t index = 0; index < sb->num_fat_blocks*FATBLOCK_FILENO/sizeof(index); index++){
+	for (uint16_t index = 0; index < sb->num_fat_blocks*sb->num_data_blocks/sizeof(index); index++){
 		*(fat+index) = buffer[index];
 	}
 
@@ -391,16 +391,19 @@ int fs_mount(const char *diskname)
 	if (load_superblock(superblock_ptr) != 0){
 		return -1;
 	}
+	printf("finished superblock\n");
 	
 	if (load_fat() != 0){
 		return -1;
 	}
+	printf("finished fat\n");
 
 	read_success = block_read(sb->num_fat_blocks+1, buf_ptr);
 	uint8_t* root_ptr = (uint8_t*)buf_ptr;
 ;	if (load_root_directory(root_ptr) != 0){
 		return -1;
 	}
+	printf("finished root\n");
 
 	return 0;
 }
@@ -433,6 +436,7 @@ int fs_umount(void)
 int fs_info(void)
 {
 	/* TODO: Phase 1 */
+	printf("running fs info\n");
 	if (!is_disk_mounted){
 		fprintf(stderr, "Error in fs_info(): no disk is mounted\n");
 		return -1;
@@ -495,7 +499,7 @@ int fs_info(void)
 	printf("data_blk_count=%d\n", sb->num_data_blocks);
 
 	int free_fat_entries = 0;
-	for (unsigned i = 0; i < sb->num_data_blocks; i++){
+	for (uint16_t i = 0; i < sb->num_data_blocks; i++){
 		if (*(fat+i) == 0){
 			free_fat_entries++;
 		}
