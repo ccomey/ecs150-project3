@@ -39,19 +39,17 @@ struct Root{
 	struct File* files[FS_FILE_MAX_COUNT];
 };
 
-struct FAT{
-	uint16_t indices[FATBLOCK_FILENO];
-};
-
 struct FileDescriptor{
 	struct File* file;
 	uint16_t offset;
 };
 
+typedef uint16_t* FAT;
+
 /* TODO: Phase 1 */
 
 struct SuperBlock* sb;
-struct FAT* fat;
+FAT fat;
 struct Root* root;
 struct FileDescriptor* open_files[FS_OPEN_MAX_COUNT];
 uint8_t num_open_files = 0;
@@ -183,7 +181,7 @@ int load_superblock(uint8_t* superblock_ptr){
 }
 
 int load_fat(){
-	fat = malloc(sizeof(struct FAT));
+	fat = malloc(sb->num_data_blocks * sizeof(uint16_t));
 	if (fat == NULL){
 		fprintf(stderr, "Error in load_fat_blocks(): malloc failed\n");
 		return -1;
@@ -201,7 +199,7 @@ int load_fat(){
 	}
 
 	for (uint16_t index = 0; index < sb->num_fat_blocks*FATBLOCK_FILENO/sizeof(index); index++){
-		fat->indices[index] = buffer[index];
+		*(fat+index) = buffer[index];
 	}
 
 	return 0;
@@ -310,8 +308,8 @@ int allocate_blocks_in_fat(const int fd, const int num_target_blocks){
 
 	if (block_index == FAT_EOC){
 		for (int i = 1; i < FATBLOCK_FILENO; i++){
-			if (fat->indices[i] == 0){
-				fat->indices[i] = FAT_EOC;
+			if (*(fat+i) == 0){
+				*(fat+i) = FAT_EOC;
 				block_index = i;
 				open_files[fd]->file->first_index = block_index;
 				num_data_blocks = 1;
@@ -321,7 +319,7 @@ int allocate_blocks_in_fat(const int fd, const int num_target_blocks){
 	}
 
 	for (block_index = open_files[fd]->file->first_index; block_index != FAT_EOC; num_data_blocks++){
-		block_index = fat->indices[block_index];
+		block_index = *(fat+block_index);
 	}
 
 	while (num_data_blocks < num_target_blocks){
@@ -329,9 +327,9 @@ int allocate_blocks_in_fat(const int fd, const int num_target_blocks){
 		// we start at 1 because fat[0] is always invalid
 		for (int i = 1; i < FATBLOCK_FILENO; i++){
 			// 0 signifies an empty entry available to incorporate into our file's linked list
-			if (fat->indices[i] == 0){
-				fat->indices[block_index] = i;
-				fat->indices[i] = FAT_EOC;
+			if (*(fat+i) == 0){
+				*(fat+block_index) = i;
+				*(fat+i) = FAT_EOC;
 				num_data_blocks++;
 				block_index = i;
 				found_new_index = 1;
@@ -360,7 +358,7 @@ int find_data_block(const int fd, const int block_num){
 			fprintf(stderr, "Error in find_data_block(): request is out of bounds for the file\n");
 			return -1;
 		}
-		block_index = fat->indices[block_index];
+		block_index = *(fat+block_index);
 	}
 
 	return block_index;
@@ -440,54 +438,79 @@ int fs_info(void)
 		return -1;
 	}
 
-	printf("Signature: ");
-	for (unsigned i = 0; i < 8; i++){
-		printf("%c", sb->signature[i]);
-	}
-
-	printf("\n");
-
-	printf("Number of blocks: %d\n", sb->num_blocks);
-	printf("Root index: %d\n", sb->root_index);
-	printf("Data start index: %d\n", sb->data_start_index);
-	printf("Number of data blocks: %d\n", sb->num_data_blocks);
-	printf("Number of FAT blocks: %d\n", sb->num_fat_blocks);
-	
-	// printf("Padding: ");
-	// for (unsigned i = 0; i < SUPERBLOCK_PAD_LEN; i++){
-	// 	printf("%d", sb->padding[i]);
+	// printf("Signature: ");
+	// for (unsigned i = 0; i < 8; i++){
+	// 	printf("%c", sb->signature[i]);
 	// }
 
 	// printf("\n");
 
-	printf("Number of blocks according to block_disk_count: %d\n", block_disk_count());
+	// printf("Number of blocks: %d\n", sb->num_blocks);
+	// printf("Root index: %d\n", sb->root_index);
+	// printf("Data start index: %d\n", sb->data_start_index);
+	// printf("Number of data blocks: %d\n", sb->num_data_blocks);
+	// printf("Number of FAT blocks: %d\n", sb->num_fat_blocks);
 	
-	printf("FAT Blocks\n");
-	for (unsigned i = 0; i < sb->num_fat_blocks; i++){
-		printf("FAT Block #%d\n", i);
-		for (unsigned j = 0; j < FATBLOCK_FILENO; j++){
-			printf("%d ", fat->indices[i*FATBLOCK_FILENO + j]);
+	// // printf("Padding: ");
+	// // for (unsigned i = 0; i < SUPERBLOCK_PAD_LEN; i++){
+	// // 	printf("%d", sb->padding[i]);
+	// // }
+
+	// // printf("\n");
+
+	// printf("Number of blocks according to block_disk_count: %d\n", block_disk_count());
+	
+	// printf("FAT Blocks\n");
+	// for (unsigned i = 0; i < sb->num_fat_blocks; i++){
+	// 	printf("FAT Block #%d\n", i);
+	// 	for (unsigned j = 0; j < FATBLOCK_FILENO; j++){
+	// 		printf("%d ", *(fat+(i*FATBLOCK_FILENO + j)));
+	// 	}
+	// 	printf("\n");
+	// }
+
+	// printf("\n");
+
+	// printf("Root directory\n");
+	// for (unsigned f = 0; f < FS_FILE_MAX_COUNT; f++){
+	// 	printf("File #%d\n", f);
+	// 	printf("Name: %s\n", root->files[f]->filename);
+	// 	printf("Size: %d\n", root->files[f]->file_size);
+	// 	printf("First index: %d\n", root->files[f]->first_index);
+	// 	printf("Padding: ");
+	// 	for (unsigned i = 0; i < 10; i++){
+	// 		printf("%d ", root->files[f]->padding[i]);
+	// 	}
+
+	// 	printf("\n");
+	// }
+
+	// printf("\n");
+
+	printf("FS Info:\n");
+	printf("total_blk_count=%d\n", block_disk_count());
+	printf("fat_blk_count=%d\n", sb->num_fat_blocks);
+	printf("rdir_blk=%d\n", sb->root_index);
+	printf("data_blk=%d\n", sb->data_start_index);
+	printf("data_blk_count=%d\n", sb->num_data_blocks);
+
+	int free_fat_entries = 0;
+	for (unsigned i = 0; i < sb->num_data_blocks; i++){
+		if (*(fat+i) == 0){
+			free_fat_entries++;
 		}
-		printf("\n");
 	}
 
-	printf("\n");
+	printf("fat_free_ratio=%d/%d\n", free_fat_entries, sb->num_data_blocks);
 
-	printf("Root directory\n");
-	for (unsigned f = 0; f < FS_FILE_MAX_COUNT; f++){
-		printf("File #%d\n", f);
-		printf("Name: %s\n", root->files[f]->filename);
-		printf("Size: %d\n", root->files[f]->file_size);
-		printf("First index: %d\n", root->files[f]->first_index);
-		printf("Padding: ");
-		for (unsigned i = 0; i < 10; i++){
-			printf("%d ", root->files[f]->padding[i]);
+	int free_root_entries = 0;
+	for (unsigned i = 0; i < FS_FILE_MAX_COUNT; i++){
+		if (root->files[i]->filename[0] == '\0'){
+			free_root_entries++;
 		}
-
-		printf("\n");
 	}
 
-	printf("\n");
+	printf("rdir_free_ratio=%d/%d\n", free_root_entries, FS_FILE_MAX_COUNT);
 	
 	return 0;
 }
@@ -567,13 +590,13 @@ int fs_delete(const char *filename)
 	struct File* old_file = root->files[matching_file_index];
 
 	uint16_t block_index = old_file->first_index;
-	while (fat->indices[block_index] != FAT_EOC){
+	while (*(fat+block_index) != FAT_EOC){
 		uint16_t old_block_index = block_index;
-		fat->indices[old_block_index] = 0;
-		block_index = fat->indices[block_index];
+		*(fat+old_block_index) = 0;
+		block_index = *(fat+block_index);
 	}
 
-	fat->indices[block_index] = 0;
+	*(fat+block_index) = 0;
 
 	old_file->filename[0] = '\0';
 	old_file->file_size = 0;
