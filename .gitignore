@@ -1,1 +1,13 @@
 notes.txt
+disk.d
+disk.o
+fs.d
+fs.o
+libfs.a
+keyboard.txt
+simple_reader.d
+simple_reader.o
+simple_writer.d
+simple_writer.o
+test_fs.d
+test_fs.o
