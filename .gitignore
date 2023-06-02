@@ -11,3 +11,7 @@ simple_writer.d
 simple_writer.o
 test_fs.d
 test_fs.o
+keyboard.txt
+prelim_block.txt
+disk.fs
+test.fs

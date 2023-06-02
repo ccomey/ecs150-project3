@@ -1,0 +1,5 @@
+MOUNT
+OPEN	test-file-1
+READ	4096	FILE	test-file-1
+CLOSE
+UMOUNT

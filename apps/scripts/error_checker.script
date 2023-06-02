@@ -1,0 +1,8 @@
+UNMOUNT
+OPEN file
+CLOSE file
+CREATE file
+DELETE file
+SEEK 3
+READ 3 DATA abc
+WRITE 3 DATA abc
