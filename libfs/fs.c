@@ -10,18 +10,15 @@
 #include "fs.h"
 
 #define SUPERBLOCK_SIG_LEN 8
-#define SUPERBLOCK_PREPAD_LEN SUPERBLOCK_SIG_LEN+2+2+2+2+1
-#define SUPERBLOCK_PAD_LEN BLOCK_SIZE-SUPERBLOCK_PREPAD_LEN
+#define SUPERBLOCK_PAD_LEN 4079
 
 #define ROOT_PAD_LEN 10
 #define ROOT_ENTRY_LEN 32
 
 #define FAT_EOC 0xFFFF
 
-#define DEBUG_MODE 1
-
 struct SuperBlock{
-	uint8_t signature[8];
+	uint8_t signature[SUPERBLOCK_SIG_LEN];
 	uint16_t num_blocks;
 	uint16_t root_index;
 	uint16_t data_start_index;
@@ -60,7 +57,7 @@ void printblock(uint8_t* block){
 				printf("%c", *(block+i));
 				break;
 			case 0:
-				printf("<NULL>");
+				printf("∅");
 				break;
 			case 10:
 				printf("<\\n>");
@@ -124,13 +121,13 @@ bool is_filename_invalid(const char* filename){
 // flags is_disk_mounted, which is used in many functions as an error check
 int load_disk(const char* diskname){
 	if (is_disk_mounted){
-		// fprintf(stderr, "Error in fs_mount(): disk already mounted\n");
+		fprintf(stderr, "Error in fs_mount(): disk already mounted\n");
 		return -1;
 	}
 	int open_disk_success = block_disk_open(diskname);
 	// printf("disk success = %d\n", open_disk_success);
 	if (open_disk_success != 0){
-		// fprintf(stderr, "Error in fs_mount(): could not read superblock\n");
+		fprintf(stderr, "Error in fs_mount(): could not read superblock\n");
 		return -1;
 	}
 
@@ -141,11 +138,18 @@ int load_disk(const char* diskname){
 // helper function for fs_mount()
 // loads in the superblock info
 int load_superblock(uint8_t* superblock_ptr){
-	sb = malloc(sizeof(struct SuperBlock));
 	if (superblock_ptr == NULL){
-		// fprintf(stderr, "Error in fs_mount(): pointer to superblock is null\n");
+		fprintf(stderr, "Error in fs_mount(): pointer to superblock is null\n");
 		return -1;
 	}
+
+	sb = malloc(sizeof(struct SuperBlock));
+	if (sb == NULL){
+		fprintf(stderr, "Error in fs_mount(): unable to allocate super block\n");
+		return -1;
+	}
+
+	// printblock(superblock_ptr);
 
 	// load each byte of the signature in one at a time
 	for (unsigned i = 0; i < SUPERBLOCK_SIG_LEN; i++){
@@ -203,14 +207,34 @@ int load_superblock(uint8_t* superblock_ptr){
 		return -1;
 	}
 
-	for (unsigned i = SUPERBLOCK_PREPAD_LEN; i < BLOCK_SIZE; i++){
+	for (unsigned i = 0; i < SUPERBLOCK_PAD_LEN; i++){
 		sb->padding[i] = *(superblock_ptr++);
 
-		if (sb->padding[i] != 0){
-			// fprintf(stderr, "Error in fs_mount(): incorrect padding formatting\n");
-			return -1;
+		if (sb->padding[i] != '\0'){
+			// fprintf(stderr, "Error in fs_mount(): incorrect superblock padding formatting\n");
+			// fprintf(stderr, "sb->padding[%d] = %d\n", i, sb->padding[i]);
+			// return -1;
 		}
 	}
+
+	// debug: print superblock
+	// printf("Sig: ");
+	// for (uint8_t i = 0; i < SUPERBLOCK_SIG_LEN; i++){
+	// 	printf("%c", sb->signature[i]);
+	// }
+
+	// printf("\nnum blocks: %d\n", sb->num_blocks);
+	// printf("root index: %d\n", sb->root_index);
+	// printf("num fat blocks: %d\n", sb->num_fat_blocks);
+	// printf("num data blocks: %d\n", sb->num_data_blocks);
+	// printf("first data index: %d\n", sb->data_start_index);
+
+	// printf("Padding: ");
+	// for (unsigned i = 0; i < SUPERBLOCK_PAD_LEN; i++){
+	// 	printf("%d", sb->padding[i]);
+	// }
+	// printf("\n");
+
 
 	return 0;
 }
@@ -220,7 +244,7 @@ int load_superblock(uint8_t* superblock_ptr){
 int load_fat(){
 	fat = malloc(sb->num_data_blocks * sizeof(uint16_t));
 	if (fat == NULL){
-		// fprintf(stderr, "Error in load_fat(): could not allocate fat block\n");
+		fprintf(stderr, "Error in load_fat(): could not allocate fat block\n");
 		return -1;
 	}
 
@@ -248,7 +272,7 @@ int load_fat(){
 		// printf("BLOCK_SIZE * %d = %d\n", i, BLOCK_SIZE*i);
 		read_success = block_read(i+1, &buffer[BLOCK_SIZE*i]);
 		if (read_success == -1){
-			// fprintf(stderr, "Error in load_fat: failed to read block at index %d\n", i+1);
+			fprintf(stderr, "Error in load_fat: failed to read block at index %d\n", i+1);
 			return -1;
 		}
 	}
@@ -257,6 +281,11 @@ int load_fat(){
 	for (uint16_t i = 0; i < sb->num_data_blocks; i++){
 		*(fat+i) = buffer[i];
 		// printf("%d\n", *(fat+i));
+	}
+
+	if (*fat != FAT_EOC){
+		fprintf(stderr, "Error in load_fat(): first element of FAT is supposed to be FAT_EOC\n");
+		return -1;
 	}
 
 	return 0;
@@ -270,6 +299,10 @@ int load_root_directory(uint8_t* root_ptr){
 	// root is an array of file pointers
 	for (unsigned f = 0; f < FS_FILE_MAX_COUNT; f++){
 		struct File* file = malloc(sizeof(struct File));
+		if (file == NULL){
+			// fprintf(stderr, "Error in load_root_directory(): failed to allocate file %d\n", f);
+			return -1;
+		}
 
 		// load in each byte of the name individually
 		// each char is one byte
@@ -288,6 +321,12 @@ int load_root_directory(uint8_t* root_ptr){
 		// load in the padding (10 bytes)
 		for (unsigned i = 0; i < ROOT_PAD_LEN; i++){
 			file->padding[i] = (*root_ptr++);
+
+			if (file->padding[i] != '\0'){
+				// fprintf(stderr, "Error in fs_mount(): incorrect padding formatting for file %d\n", f);
+				// fprintf(stderr, "file->padding[%d] = %d\n", i, sb->padding[i]);
+				// return -1;
+			}
 		}
 
 		root[f] = file;
@@ -330,11 +369,17 @@ int find_matching_filename(const char* filename){
 // the index of the file in the array is its FD num, the one used in many func params
 int add_file_to_fd_array(struct File* file){
 	if (num_open_files > FS_OPEN_MAX_COUNT){
+		// fprintf(stderr, "Error in add_file_to_fd_array(): max number of files already open\n");
 		return -1;
 	}
 	
 	// initialize FD
 	struct FileDescriptor* fd = malloc(sizeof(struct FileDescriptor));
+	if (fd == NULL){
+		// fprintf(stderr, "Error in add_file_to_fd_array(): unable to alloacte file descriptor\n");
+		return -1;
+	}
+
 	fd->file = file;
 	fd->offset = 0;
 	
@@ -355,21 +400,6 @@ int add_file_to_fd_array(struct File* file){
 // helper function for fs_write() and fs_read()
 // finds the number of blocks required to access for the write/read
 int find_num_target_blocks(uint16_t offset, size_t count){
-	if (offset + count <= BLOCK_SIZE){
-		return 1;
-	}
-
-	/*
-	scenario - offset is 3 blocks + 1 partial block. lets say 4096*3 + 1000
-	count is 4 blocks + 1 partial block. lets say 4096*4 + 3000
-	the return of this func should include the 3 blocks we dont write to
-	starting indexing at block 0,
-	we start at byte 1000 of block 3
-	we then write from byte 1000 of block 3 to byte 1000 of block 7
-	then we write to byte 4000 of block 7
-	it should return 8
-	however, if offset % BLOCK_SIZE + count % BLOCK_SIZE > BLOCK_SIZE, it should return 1 more (9)
-	*/
 	int num_target_blocks = 0;
 	size_t data = offset + count;
 	num_target_blocks += data / BLOCK_SIZE;
@@ -473,7 +503,7 @@ int fs_mount(const char *diskname)
 
 	// open the disk
 	if (load_disk(diskname) != 0){
-		// fprintf(stderr, "Error in fs_mount(): could not open disk\n");
+		fprintf(stderr, "Error in fs_mount(): could not open disk\n");
 		return -1;
 	}
 
@@ -899,7 +929,7 @@ int fs_write(int fd, void *buf, size_t count)
 	int bytes_written = 0;
 
 	// the index of the first block we will write fully to
-	uint16_t full_block_start_index = 0;
+	uint16_t full_block_start_index = offset / BLOCK_SIZE;
 
 	// the number of blocks we will be writing to
 	// this includes blocks skipped by the offset
@@ -915,7 +945,7 @@ int fs_write(int fd, void *buf, size_t count)
 	}
 
 	// partial first block (if applicable)
-	if (offset != 0){
+	if (offset % BLOCK_SIZE != 0){
 		/*
 		scenarios:
 			if offset < BLOCK_SIZE, then offset / BLOCK_SIZE = 0
@@ -967,7 +997,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// copy from the buffer starting from the offset
 		// copy enough to fill the block, or the entire buffer if it is smaller
 		memcpy(&bounce_buffer[offset % BLOCK_SIZE], buf, write_amount);
-		// printf("bounce buffer after memcpy\n");
+		// printf("write: partial first block\nindex %d\nbounce buffer after memcpy\n", first_index);
 		// printblock(bounce_buffer);
 		op_success = block_write(first_index, bounce_buffer);
 		// uint8_t buffer[BLOCK_SIZE];
@@ -980,7 +1010,7 @@ int fs_write(int fd, void *buf, size_t count)
 		}
 
 		bytes_written += write_amount;
-		full_block_start_index = (offset / BLOCK_SIZE) + 1;
+		full_block_start_index++;
 	}
 	
 	// full blocks (if applicable)
@@ -1009,7 +1039,7 @@ int fs_write(int fd, void *buf, size_t count)
 		op_success = block_write(block_index, buf+buf_offset);
 		uint8_t buffer[BLOCK_SIZE];
 		block_read(block_index, buffer);
-		// printf("just after writing block\n");
+		// printf("write: full block %d\nindex%d\n", i, block_index);
 		// printblock(buffer);
 
 		if (op_success == -1){
@@ -1034,7 +1064,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// like above, last_index will be FAT_EOC if there is not enough space to write the last block
 		// we must end the write here if so
 		if (last_index == FAT_EOC){
-			fprintf(stderr, "Error in fs_write(): no space to write last block");
+			fprintf(stderr, "Error in fs_write(): no space to write last block\n");
 			return bytes_written;
 		}
 
@@ -1060,7 +1090,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// overwrite buffer from 0 to remainder size with data
 		memcpy(&bounce_buffer[0], buf+buf_offset, remainder_block_size);
 		op_success = block_write(last_index, bounce_buffer);
-		// printf("bounce buffer after write and memcpy\n");
+		// printf("write: partial last block at index %d\nbounce buffer after write and memcpy\n", last_index);
 		// printblock(bounce_buffer);
 		// uint8_t buffer[BLOCK_SIZE];
 		// block_read(last_index, buffer);
@@ -1108,12 +1138,13 @@ int fs_read(int fd, void *buf, size_t count)
 	int num_target_blocks = find_num_target_blocks(offset, count);
 	int read_success = 0;
 	int bytes_read = 0;
-	uint16_t full_block_start_index = 0;
+	uint16_t full_block_start_index = offset / BLOCK_SIZE;
+	// printf("full block start index = %d\n", full_block_start_index);
 	// memcpy(dest, src, count)
 	// printf("offset = %d\n", offset);
 
 	// partial first block (if applicable)
-	if (offset != 0){
+	if (offset % BLOCK_SIZE != 0){
 		uint16_t first_index = find_data_block(fd, offset / BLOCK_SIZE);
 
 		if (first_index == FAT_EOC){
@@ -1121,10 +1152,11 @@ int fs_read(int fd, void *buf, size_t count)
 		}
 
 		first_index += sb->data_start_index;
+		// printf("read: partial block\nindex %d\n", first_index);
 		uint8_t bounce_buffer[BLOCK_SIZE];
 		read_success = block_read(first_index, bounce_buffer);
 		if (read_success == -1){
-			// fprintf(stderr, "Error in fs_read(): failed to read first block, at index %d\n", first_index);
+			fprintf(stderr, "Error in fs_read(): failed to read first block, at index %d\n", first_index);
 			return -1;
 		}
 
@@ -1141,13 +1173,11 @@ int fs_read(int fd, void *buf, size_t count)
 
 		memcpy(buf, &bounce_buffer[offset % BLOCK_SIZE], read_amount);
 		bytes_read += read_amount;
-		full_block_start_index = (offset / BLOCK_SIZE) + 1;
+		full_block_start_index++;
 		// printf("bytes read after partial block: %d\n", bytes_read);
-		// printf("full block start index = %d\n", full_block_start_index);
 	}
 
 	// full blocks (if applicable)
-
 	int num_full_blocks = num_target_blocks - (offset / BLOCK_SIZE) - (bytes_read != 0);
 	num_full_blocks -= (count - bytes_read) % BLOCK_SIZE != 0;
 
@@ -1156,10 +1186,12 @@ int fs_read(int fd, void *buf, size_t count)
 		uint16_t block_index = find_data_block(fd, i);
 
 		if (block_index == FAT_EOC){
+			fprintf(stderr, "Error in fs_read(): ran out of room for block %d; exiting prematurely\n", i);
 			return bytes_read;
 		}
 
 		block_index += sb->data_start_index;
+		// printf("read: full block %d\nindex %d\n", i, block_index);
 		// printf("block index = %d\n", block_index);
 		
 		int buf_offset = bytes_read;
@@ -1181,7 +1213,7 @@ int fs_read(int fd, void *buf, size_t count)
 
 	int remainder_block_size = count - bytes_read;
 	// printf("remainder = %ld - %d = %d\n", count, bytes_read, remainder_block_size);
-	if (remainder_block_size >= BLOCK_SIZE){
+	if (remainder_block_size < 0 || remainder_block_size >= BLOCK_SIZE){
 		fprintf(stderr, "Error in fs_read(): something went wrong with read portions\n");
 		return -1;
 	}
@@ -1190,10 +1222,12 @@ int fs_read(int fd, void *buf, size_t count)
 		uint16_t last_index = find_data_block(fd, num_target_blocks-1);
 
 		if (last_index == FAT_EOC){
+			fprintf(stderr, "Error in fs_read(): ran out of room for last block; exiting prematurely\n");
 			return bytes_read;
 		}
 
 		last_index += sb->data_start_index;
+		// printf("read: last block\nindex %d\n", last_index);
 		uint8_t bounce_buffer[BLOCK_SIZE];
 		read_success = block_read(last_index, bounce_buffer);
 		if (read_success == -1){
