@@ -57,22 +57,22 @@ void printblock(uint8_t* block){
 	for (unsigned i = 0; i < BLOCK_SIZE; i++){
 		switch (*(block+i)){
 			case 32 ... 126:
-				printf("%c ", *(block+i));
+				printf("%c", *(block+i));
 				break;
 			case 0:
-				printf("NULL ");
+				printf("<NULL>");
 				break;
 			case 10:
-				printf("\\n ");
+				printf("<\\n>");
 				break;
 			case 9:
-				printf("\\t ");
+				printf("<\\t>");
 				break;
 			case 13:
-				printf("\\r ");
+				printf("<\\r>");
 				break;
 			default:
-				printf("%d ", *(block+i));
+				printf("<%d>", *(block+i));
 				break;
 		}
 	}
@@ -369,25 +369,11 @@ int find_num_target_blocks(uint16_t offset, size_t count){
 	then we write to byte 4000 of block 7
 	it should return 8
 	however, if offset % BLOCK_SIZE + count % BLOCK_SIZE > BLOCK_SIZE, it should return 1 more (9)
-	
-	let offset = m*B + o
-	let count = n*B + c
-	num full blocks = m+n
 	*/
 	int num_target_blocks = 0;
-	if (offset != 0){
-		// in our scenario, 0+3 = 3
-		num_target_blocks += offset / BLOCK_SIZE;
-		if (offset % BLOCK_SIZE != 0){
-			// 3+1 = 4
-			num_target_blocks++;
-		}
-	}
-
-	// 4 + 4 = 8
-	num_target_blocks += count / BLOCK_SIZE;
-
-	if (offset % BLOCK_SIZE + count % BLOCK_SIZE != 0){
+	size_t data = offset + count;
+	num_target_blocks += data / BLOCK_SIZE;
+	if (data % BLOCK_SIZE != 0){
 		num_target_blocks++;
 	}
 
@@ -925,13 +911,11 @@ int fs_write(int fd, void *buf, size_t count)
 	if (op_success == -1){
 		// if this fails, then there are not enough blocks to complete the write
 		// however, the function will continue and write as much as it can
-		fprintf(stderr, "Error in fs_write(): block allocation failed\n");
+		// fprintf(stderr, "Error in fs_write(): block allocation failed\n");
 	}
 
 	// partial first block (if applicable)
 	if (offset != 0){
-		// uint16_t first_index = open_files[fd]->file->first_index;
-
 		/*
 		scenarios:
 			if offset < BLOCK_SIZE, then offset / BLOCK_SIZE = 0
@@ -961,7 +945,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// bounce buffer contains the first block
 		op_success = block_read(first_index, bounce_buffer);
 		if (op_success == -1){
-			// fprintf(stderr, "Error in fs_write(): failed to read first block, at index %d\n", first_index);
+			fprintf(stderr, "Error in fs_write(): failed to read first block, at index %d\n", first_index);
 			return -1;
 		}
 
@@ -1002,7 +986,8 @@ int fs_write(int fd, void *buf, size_t count)
 	// full blocks (if applicable)
 
 	// num_full_blocks is the number of blocks we write to entirely
-	int num_full_blocks = (count - (offset % BLOCK_SIZE)) / BLOCK_SIZE;
+	int num_full_blocks = num_target_blocks - (offset / BLOCK_SIZE) - (bytes_written != 0);
+	num_full_blocks -= (count - bytes_written) % BLOCK_SIZE != 0;
 	for (int i = full_block_start_index; i < num_full_blocks + full_block_start_index; i++){
 		uint16_t block_index = find_data_block(fd, i);
 
@@ -1019,7 +1004,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// if there was no offset, it should just be BLOCK_SIZE*i
 		// if there was, it should be the amount of data already written
 		// that would be (offset % BLOCK_SIZE) + (BLOCK_SIZE * (i-full_block_start_index))
-		int buf_offset = (BLOCK_SIZE * (i-full_block_start_index)) + (offset % BLOCK_SIZE);
+		int buf_offset = bytes_written;
 
 		op_success = block_write(block_index, buf+buf_offset);
 		uint8_t buffer[BLOCK_SIZE];
@@ -1126,7 +1111,6 @@ int fs_read(int fd, void *buf, size_t count)
 	uint16_t full_block_start_index = 0;
 	// memcpy(dest, src, count)
 	// printf("offset = %d\n", offset);
-	// printf("full block start index = %d\n", full_block_start_index);
 
 	// partial first block (if applicable)
 	if (offset != 0){
@@ -1158,11 +1142,15 @@ int fs_read(int fd, void *buf, size_t count)
 		memcpy(buf, &bounce_buffer[offset % BLOCK_SIZE], read_amount);
 		bytes_read += read_amount;
 		full_block_start_index = (offset / BLOCK_SIZE) + 1;
+		// printf("bytes read after partial block: %d\n", bytes_read);
+		// printf("full block start index = %d\n", full_block_start_index);
 	}
 
 	// full blocks (if applicable)
 
-	int num_full_blocks = (count - (offset % BLOCK_SIZE)) / BLOCK_SIZE;
+	int num_full_blocks = num_target_blocks - (offset / BLOCK_SIZE) - (bytes_read != 0);
+	num_full_blocks -= (count - bytes_read) % BLOCK_SIZE != 0;
+
 	// printf("num_full_blocks = %d\n", num_full_blocks);
 	for (int i = full_block_start_index; i < num_full_blocks + full_block_start_index; i++){
 		uint16_t block_index = find_data_block(fd, i);
@@ -1174,13 +1162,13 @@ int fs_read(int fd, void *buf, size_t count)
 		block_index += sb->data_start_index;
 		// printf("block index = %d\n", block_index);
 		
-		int buf_offset = (BLOCK_SIZE * (i-full_block_start_index)) + (offset % BLOCK_SIZE);
+		int buf_offset = bytes_read;
 
 		// printf("buf offset = %d\n", buf_offset);
 
 		read_success = block_read(block_index, buf+buf_offset);
-		// uint8_t buffer[BLOCK_SIZE];
-		// block_read(block_index, buffer);
+		uint8_t buffer[BLOCK_SIZE];
+		block_read(block_index, buffer);
 		// printf("in read()\n");
 		// printblock(buffer);
 
@@ -1192,7 +1180,7 @@ int fs_read(int fd, void *buf, size_t count)
 	}
 
 	int remainder_block_size = count - bytes_read;
-	// printf("remainder = %d\n", remainder_block_size);
+	// printf("remainder = %ld - %d = %d\n", count, bytes_read, remainder_block_size);
 	if (remainder_block_size >= BLOCK_SIZE){
 		fprintf(stderr, "Error in fs_read(): something went wrong with read portions\n");
 		return -1;
@@ -1212,12 +1200,11 @@ int fs_read(int fd, void *buf, size_t count)
 			fprintf(stderr, "Error in fs_read(): failed to read last block %d, at index %d\n", num_target_blocks-1, last_index);
 			return -1;
 		}
+		uint8_t buffer[BLOCK_SIZE];
+		block_read(last_index, buffer);
+		// printf("whole last block in read\n");
+		// printblock(buffer);
 
-		/*
-		buf contains data we have read
-		the first part of the code should have buf[0...4096-168] be file[168...4096]
-		this part should have buf[4096-168...4096] be file[4096...4096+168]
-		*/
 		int buf_offset = bytes_read;
 		// printf("buf offset = %d\n", buf_offset);
 		memcpy(buf+buf_offset, &bounce_buffer[0], remainder_block_size);
