@@ -12,6 +12,7 @@ SEEK	0
 WRITE	FILE	prelim_text.txt
 WRITE	FILE	gg4096.txt
 WRITE	FILE	gg10403.txt
+READ	10	FILE	empty.txt
 SEEK	0
 READ	168	FILE	prelim_text.txt
 READ	4096	FILE	gg4096.txt
@@ -21,6 +22,19 @@ READ	10	DATA	u door.
 SEEK	0
 READ	4096	FILE	block0.txt
 READ	4096	FILE	block1.txt
+SEEK	4090
+WRITE	FILE	alphabet.txt
+SEEK	4090
+READ	26	FILE	alphabet.txt
+SEEK	5000
+WRITE	FILE	alphabet.txt
+SEEK	5000
+READ	26	FILE	alphabet.txt
+CREATE	f2
+OPEN	f2
+READ	10	FILE	empty.txt
+CLOSE
 CLOSE
 DELETE	f1
+DELETE	f2
 UNMOUNT
