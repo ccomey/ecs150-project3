@@ -55,7 +55,26 @@ bool is_disk_mounted = false;
 // prints every byte in a block, defined as BLOCK_SIZE lengthed byte array
 void printblock(uint8_t* block){
 	for (unsigned i = 0; i < BLOCK_SIZE; i++){
-		printf("%d ", *(block+i));
+		switch (*(block+i)){
+			case 32 ... 126:
+				printf("%c ", *(block+i));
+				break;
+			case 0:
+				printf("NULL ");
+				break;
+			case 10:
+				printf("\\n ");
+				break;
+			case 9:
+				printf("\\t ");
+				break;
+			case 13:
+				printf("\\r ");
+				break;
+			default:
+				printf("%d ", *(block+i));
+				break;
+		}
 	}
 
 	printf("\n\n");
@@ -1018,7 +1037,10 @@ int fs_write(int fd, void *buf, size_t count)
 
 	// the remainder block is the last partial block
 	// if the last block we needed to write was a full block, we should skip this part
-	int remainder_block_size = (count - (offset % BLOCK_SIZE)) % BLOCK_SIZE;
+	int remainder_block_size = count - bytes_written;
+	if (remainder_block_size >= BLOCK_SIZE){
+		fprintf(stderr, "Error in fs_write(): something went wrong with portions\n");
+	}
 	// printf("remainder = %d\n", remainder_block_size);
 
 	if (remainder_block_size != 0){
@@ -1169,8 +1191,12 @@ int fs_read(int fd, void *buf, size_t count)
 		bytes_read += BLOCK_SIZE;
 	}
 
-	int remainder_block_size = (count - (offset % BLOCK_SIZE)) % BLOCK_SIZE;
+	int remainder_block_size = count - bytes_read;
 	// printf("remainder = %d\n", remainder_block_size);
+	if (remainder_block_size >= BLOCK_SIZE){
+		fprintf(stderr, "Error in fs_read(): something went wrong with read portions\n");
+		return -1;
+	}
 	// partial last block (if applicable)
 	if (remainder_block_size != 0){
 		uint16_t last_index = find_data_block(fd, num_target_blocks-1);
@@ -1183,7 +1209,7 @@ int fs_read(int fd, void *buf, size_t count)
 		uint8_t bounce_buffer[BLOCK_SIZE];
 		read_success = block_read(last_index, bounce_buffer);
 		if (read_success == -1){
-			// fprintf(stderr, "Error in fs_read(): failed to read last block %d, at index %d\n", num_target_blocks-1, last_index);
+			fprintf(stderr, "Error in fs_read(): failed to read last block %d, at index %d\n", num_target_blocks-1, last_index);
 			return -1;
 		}
 
