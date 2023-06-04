@@ -7,8 +7,10 @@ libfs.a
 keyboard.txt
 simple_reader.d
 simple_reader.o
+simple_reader.x
 simple_writer.d
 simple_writer.o
+simple_writer.x
 test_fs.d
 test_fs.o
 keyboard.txt
@@ -16,3 +18,4 @@ prelim_block.txt
 disk.fs
 test.fs
 .vscode
+output.txt
