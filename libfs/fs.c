@@ -1068,7 +1068,7 @@ int fs_write(int fd, void *buf, size_t count)
 		// printblock(bounce_buffer);
 
 		// buf_offset is the starting point for the data we are writing
-		int buf_offset = BLOCK_SIZE*num_full_blocks + (offset % BLOCK_SIZE);
+		int buf_offset = bytes_written;
 		// printf("buf offset = %d\n", buf_offset);
 		// printf("index = %d\n", last_index);
 
@@ -1089,7 +1089,7 @@ int fs_write(int fd, void *buf, size_t count)
 		bytes_written += remainder_block_size;
 	}
 
-	open_files[fd]->offset = bytes_written;
+	open_files[fd]->offset += bytes_written;
 	open_files[fd]->file->file_size += bytes_written;
 	return bytes_written;
 }
@@ -1213,14 +1213,20 @@ int fs_read(int fd, void *buf, size_t count)
 			return -1;
 		}
 
-		int buf_offset = BLOCK_SIZE*num_full_blocks + (offset % BLOCK_SIZE);
+		/*
+		buf contains data we have read
+		the first part of the code should have buf[0...4096-168] be file[168...4096]
+		this part should have buf[4096-168...4096] be file[4096...4096+168]
+		*/
+		int buf_offset = bytes_read;
+		// printf("buf offset = %d\n", buf_offset);
 		memcpy(buf+buf_offset, &bounce_buffer[0], remainder_block_size);
 		bytes_read += remainder_block_size;
 	}
 
-	open_files[fd]->offset = bytes_read;
+	open_files[fd]->offset += bytes_read;
 	return bytes_read;
 	// printf("%d %p %ld\n", fd, buf, count);
-	// return 0;
+	return 0;
 }
 
