@@ -213,7 +213,7 @@ int load_superblock(uint8_t* superblock_ptr){
 		if (sb->padding[i] != '\0'){
 			// fprintf(stderr, "Error in fs_mount(): incorrect superblock padding formatting\n");
 			// fprintf(stderr, "sb->padding[%d] = %d\n", i, sb->padding[i]);
-			// return -1;
+			return -1;
 		}
 	}
 
@@ -325,7 +325,7 @@ int load_root_directory(uint8_t* root_ptr){
 			if (file->padding[i] != '\0'){
 				// fprintf(stderr, "Error in fs_mount(): incorrect padding formatting for file %d\n", f);
 				// fprintf(stderr, "file->padding[%d] = %d\n", i, sb->padding[i]);
-				// return -1;
+				return -1;
 			}
 		}
 
